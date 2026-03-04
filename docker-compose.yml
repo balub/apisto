@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: apisto-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: apisto
+      POSTGRES_PASSWORD: apisto
+      POSTGRES_DB: apisto
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apisto"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: apisto-mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  apisto:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apisto-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      APISTO_PORT: 8080
+      APISTO_DATABASE_URL: postgres://apisto:apisto@timescaledb:5432/apisto?sslmode=disable
+      APISTO_MQTT_BROKER_URL: tcp://mosquitto:1883
+      APISTO_MQTT_CLIENT_ID: apisto-server
+      APISTO_RETENTION_DAYS: 30
+      APISTO_HEARTBEAT_TIMEOUT: 60
+      APISTO_LOG_LEVEL: info
+      APISTO_CORS_ORIGINS: "*"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+
+volumes:
+  timescaledb_data:
+  mosquitto_data:
+  mosquitto_log:
